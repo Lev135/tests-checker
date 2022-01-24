@@ -10,18 +10,22 @@ import TestAlignAriphm
       AlignAriphmExpr,
       AlignAriphmExpr'(ABinOp, AConst, AVar) )
 import Utils
-    ( allEq,
-      betweenCh,
-      guardE,
-      lineSpaces,
-      lineSpaces1,
-      map2,
-      maybeToExcept,
-      vSpace,
+    ( PosSegm,
       withPosP,
-      Parser,
+      maybeToExcept,
+      map2,
+      lineSpaces1,
+      lineSpaces,
+      guardE,
+      betweenCh,
+      allEq,
       Pos(..),
-      PosSegm )
+      Parser,
+      vSpace,
+      Wrap,
+      Box,
+      ($$) )
+
 
 import Control.Applicative ((<|>))
 import Text.Parsec
@@ -97,27 +101,27 @@ pp p = parse (p <* eof) ""
 varByLvl :: Int -> String
 varByLvl = (map ('$':) ["i", "j", "k", "l"] !!)
 
-data Loop = Loop {
-        lBlock   :: AlignDescr,
+data Loop p = Loop {
+        lBlock   :: Wrap p AlignDescr',
         lIdxVar  :: String,
         lFirstI  :: AlignAriphmExpr,
         lLastI   :: AlignAriphmExpr,
         lSepSp   :: AlignSpaces
     }
 
-data AlignDescr'
+data AlignDescr' p
     = ADVar        String [AlignAriphmExpr]
-    | ALoop        Loop
+    | ALoop        (Loop p)
     | AString      String
-    | ABlock       [AlignDescr]
+    | ABlock       [Wrap p AlignDescr']
     | ASpaces      AlignSpaces
 
-type AlignDescr = Pos AlignDescr'
+type AlignDescrPos = Wrap Pos AlignDescr'
 
-makeDescr :: AlignDescrLex -> Except AlignDescrProcessError  AlignDescr
+makeDescr :: AlignDescrLex -> Except AlignDescrProcessError AlignDescrPos
 makeDescr = makeDescrImpl 0
 
-makeDescrImpl :: Int -> AlignDescrLex -> Except AlignDescrProcessError AlignDescr
+makeDescrImpl :: Int -> AlignDescrLex -> Except AlignDescrProcessError AlignDescrPos
 makeDescrImpl lvl (Pos p (ALVar name idxs)) = return $ Pos p $ ADVar name idxs
 makeDescrImpl lvl (Pos p (ALString str))    = return $ Pos p $ AString str
 makeDescrImpl lvl (Pos p (ALBlock es))      = Pos p . ABlock <$> mapM (makeDescrImpl lvl) es
@@ -159,8 +163,8 @@ compareAriphm idxVarName pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
         equal    = return (Pos p e1, Nothing)
         foundIdx = return (idxVar, Just(pe1, pe2))
 
-compareParts :: String -> AlignDescr -> AlignDescr
-    -> Except AlignDescrProcessError (AlignDescr, Maybe (AlignAriphmExpr, AlignAriphmExpr))
+compareParts :: String -> AlignDescrPos -> AlignDescrPos
+    -> Except AlignDescrProcessError (AlignDescrPos, Maybe (AlignAriphmExpr, AlignAriphmExpr))
 compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
     (ADVar name1 idxs1, ADVar name2 idxs2) -> do
         guardE (ADE ADE_UnequalNames p1 p2) $ name1 == name2
@@ -214,19 +218,19 @@ instance Show AlignDescrLex' where
     show (ALBlock es)           = "{" ++ concatMap show es ++ "}"
     show (ALSpaces sp)          = show sp
 
-instance Show Loop where
+instance Box p => Show (Loop p) where
     show (Loop block idxV fIdx lIdx sepSp)
-        = "<" ++ show block ++ show sepSp ++ "|" ++ idxV ++ "=" ++ show fIdx ++ ".." ++ show lIdx ++ ">"
+        = "<" ++ show $$ block ++ show sepSp ++ "|" ++ idxV ++ "=" ++ show fIdx ++ ".." ++ show lIdx ++ ">"
 
-instance Show AlignDescr' where
+instance Box p => Show (AlignDescr' p) where
     show (ADVar name idxs) = name ++ concatMap h idxs
         where h = \i -> "[" ++ show i ++ "]"
     show (ALoop l)         = show l -- show e ++ ".." ++ show e'
     show (AString s)       = show s
-    show (ABlock es )      = "{" ++ concatMap show es ++ "}"
+    show (ABlock es )      = "{" ++ concatMap (show $$) es ++ "}"
     show (ASpaces sp)      = show sp
 
-readDescr :: String -> Except String [AlignDescr]
+readDescr :: String -> Except String [AlignDescrPos]
 readDescr s = do
     lex <- case parse (alignP <* eof) "" s of
       Left  e ->    throwE $ "ParseError: " ++ show e

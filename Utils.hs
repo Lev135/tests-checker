@@ -1,6 +1,7 @@
 module Utils (
     Parser, betweenCh, lineSpaces, lineSpaces1, vSpace,
     allEq, map2,
+    Box (..), ($$), (=<.<), Wrap, 
     Pos (..), PosSegm, makePos, withPosP,
     maybeToExcept, guardE
 ) where
@@ -42,12 +43,30 @@ map2 _ [] []             = Just []
 map2 g (a : as) (b : bs) = (g a b :) <$> map2 g as bs
 map2 _ _ _               = Nothing
 
+
+class Box p where
+    unBox :: p a -> a
+
+($$) :: Box p => (a -> b) -> p a -> b
+f $$ pa = f $ unBox pa
+
+(=<.<) :: (Functor f, Functor p, Box p) => (a -> f b) -> p a -> f (p b)
+f =<.< a = (<$ a) <$> unBox (f <$> a)
+
+type Wrap p t = p (t p)
+
 type PosSegm = (SourcePos, SourcePos)
 
 makePos :: SourcePos -> PosSegm
 makePos p = (p, p)
 
 data Pos t = Pos {pPos :: [PosSegm], pVal :: t}
+
+instance Box Pos where
+    unBox = pVal
+
+instance Functor Pos where
+    fmap f (Pos p a) = Pos p $ f a
 
 instance Eq t => Eq (Pos t) where
     p == q = pVal p == pVal q
