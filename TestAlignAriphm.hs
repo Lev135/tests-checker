@@ -1,5 +1,5 @@
 module TestAlignAriphm (
-    AlignAriphmOp (..), AlignAriphmExpr (..), AlignAriphmExpr' (..), ariphmExprP, ariphmTermP
+    AlignAriphmOp (..), AlignAriphmExprPos (..), AlignAriphmExpr' (..), ariphmExprP, ariphmTermP
 ) where
 
 import Control.Applicative ((<|>))
@@ -7,21 +7,26 @@ import Text.Parsec
     ( char, between, digit, letter, many1, Parsec, (<?>))
 import Text.Parsec.Char ( spaces )
 import Control.Monad.Combinators.Expr
-    ( makeExprParser, Operator(InfixL, InfixR) ) 
+    ( makeExprParser, Operator(InfixL, InfixR) )
 import Text.Parsec.Token (GenTokenParser(parens, integer))
-import Utils (lineSpaces, Pos, withPosP)
+import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$))
 
 data AlignAriphmOp
     = ASum | ADiff | ADiv | AProd | APow
     deriving Eq
 
-data AlignAriphmExpr'
+data AlignAriphmExpr' p
     = AVar     String
     | AConst   Int
-    | ABinOp   AlignAriphmOp AlignAriphmExpr' AlignAriphmExpr'
-    deriving Eq
+    | ABinOp   AlignAriphmOp (Wrap p AlignAriphmExpr') (Wrap p AlignAriphmExpr')
 
-type AlignAriphmExpr = Pos AlignAriphmExpr'
+instance (Box p) => Eq (AlignAriphmExpr' p) where
+    (AVar v1) == (AVar v2) = v1 == v2
+    (AConst c1) == (AConst c2) = c1 == c2
+    (ABinOp op1 e1 e1') == (ABinOp op2 e2 e2') = op1 == op2 && unBox e1 == unBox e2 && unBox e1' == unBox e2'
+    _ == _ = False
+
+type AlignAriphmExprPos = Wrap Pos AlignAriphmExpr'
 
 instance Show AlignAriphmOp where
     show ASum  = "+"
@@ -30,37 +35,39 @@ instance Show AlignAriphmOp where
     show ADiv  = "/"
     show APow  = "^"
 
-instance Show AlignAriphmExpr' where
+instance Box p => Show (AlignAriphmExpr' p) where
     show (AVar str) = str
     show (AConst n) = show n
-    show (ABinOp op e e') = "(" ++ show e ++ " " ++ show op ++ " " ++ show e' ++ ")"
+    show (ABinOp op e e') = "(" ++ show $$ e ++ " " ++ show op ++ " " ++ show $$ e' ++ ")"
 
 type Parser t = (Parsec String () t)
 
-ariphmExprP' :: Parser AlignAriphmExpr'
-ariphmExprP' = makeExprParser (ariphmTermP' <* lineSpaces) operators <* lineSpaces 
-    <?> "expression"
+ariphmExprP :: Parser AlignAriphmExprPos
+ariphmExprP = makeExprParser (ariphmTermP <* lineSpaces) operators <* lineSpaces
+        <?> "expression"
 
-ariphmExprP :: Parser AlignAriphmExpr
-ariphmExprP = withPosP ariphmExprP'
-
-ariphmTermP' :: Parser AlignAriphmExpr'
-ariphmTermP' = between (char '(') (char ')') ariphmExprP' 
-    <|> AConst . read <$> many1 digit 
-    <|> AVar <$> many1 letter 
+ariphmTermP :: Parser AlignAriphmExprPos
+ariphmTermP = between (char '(') (char ')') ariphmExprP
+    <|> withPosP (AConst . read <$> many1 digit)
+    <|> withPosP (AVar <$> many1 letter)
     <?> "term"
 
-ariphmTermP :: Parser AlignAriphmExpr
-ariphmTermP = withPosP ariphmTermP'
-
-operators :: [[Operator (Parsec String ()) AlignAriphmExpr']]
+operators :: [[Operator (Parsec String ()) AlignAriphmExprPos]]
 operators = [
-        [ InfixR (ABinOp APow <$ char '^' <* lineSpaces)
+        [ InfixR $ tmp (ABinOp APow <$ char '^' <* lineSpaces)
         ],
-        [ InfixL (ABinOp AProd <$ char '*' <* lineSpaces)
-        , InfixL (ABinOp ADiv  <$ char '/' <* lineSpaces)
+        [ InfixL $ tmp (ABinOp AProd <$ char '*' <* lineSpaces)
+        , InfixL $ tmp (ABinOp ADiv  <$ char '/' <* lineSpaces)
         ],
-        [ InfixL (ABinOp ASum  <$ char '+' <* lineSpaces)
-        , InfixL (ABinOp ADiff <$ char '-' <* lineSpaces)
+        [ InfixL $ tmp (ABinOp ASum  <$ char '+' <* lineSpaces)
+        , InfixL $ tmp (ABinOp ADiff <$ char '-' <* lineSpaces)
         ]
     ]
+
+
+tmp :: Parser (AlignAriphmExprPos -> AlignAriphmExprPos -> AlignAriphmExpr' Pos)
+     -> Parser (AlignAriphmExprPos -> AlignAriphmExprPos -> AlignAriphmExprPos)
+tmp pg = do
+    g <- withPosP pg
+    let g' a b = Pos (pPos g) $ pVal g a b
+    return g'

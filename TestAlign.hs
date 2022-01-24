@@ -7,7 +7,7 @@ module TestAlign (
 
 import TestAlignAriphm
     ( ariphmExprP,
-      AlignAriphmExpr,
+      AlignAriphmExprPos,
       AlignAriphmExpr'(ABinOp, AConst, AVar) )
 import Utils
     ( PosSegm,
@@ -44,7 +44,7 @@ data AlignSpaces = ANoSpace | ASpace | ANewLine
     deriving Eq
 
 data AlignDescrLex'
-    = ALVar        String [AlignAriphmExpr]
+    = ALVar        String [AlignAriphmExprPos]
     | ALLoop       AlignDescrLex (Pos AlignSpaces) (Pos AlignSpaces) AlignDescrLex
     | ALString     String
     | ALBlock      [AlignDescrLex]
@@ -104,13 +104,13 @@ varByLvl = (map ('$':) ["i", "j", "k", "l"] !!)
 data Loop p = Loop {
         lBlock   :: Wrap p AlignDescr',
         lIdxVar  :: String,
-        lFirstI  :: AlignAriphmExpr,
-        lLastI   :: AlignAriphmExpr,
+        lFirstI  :: Wrap p AlignAriphmExpr',
+        lLastI   :: Wrap p AlignAriphmExpr',
         lSepSp   :: AlignSpaces
     }
 
 data AlignDescr' p
-    = ADVar        String [AlignAriphmExpr]
+    = ADVar        String [Wrap p AlignAriphmExpr']
     | ALoop        (Loop p)
     | AString      String
     | ABlock       [Wrap p AlignDescr']
@@ -138,8 +138,8 @@ makeDescrImpl lvl (Pos p (ALLoop b1 (Pos p1 sepSp1) (Pos p2 sepSp2) b2))    = do
                     lvl' = lvl + 1
                     idxVar = varByLvl lvl
 
-compareAriphm :: String -> AlignAriphmExpr -> AlignAriphmExpr
-    -> Except AlignDescrProcessError (AlignAriphmExpr, Maybe (AlignAriphmExpr, AlignAriphmExpr))
+compareAriphm :: String -> AlignAriphmExprPos -> AlignAriphmExprPos
+    -> Except AlignDescrProcessError (AlignAriphmExprPos, Maybe (AlignAriphmExprPos, AlignAriphmExprPos))
 compareAriphm idxVarName pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
     (AVar s1, AVar s2) ->
         if s1 == s2 then equal
@@ -150,10 +150,10 @@ compareAriphm idxVarName pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
     (ABinOp op1 a1 b1, ABinOp op2 a2 b2) ->
         do
             guardE (ADE ADE_UnequalOperations p1 p2) $ op1 == op2
-            compA <- compareAriphm idxVarName (Pos p1 a1) (Pos p2 a2)
-            compB <- compareAriphm idxVarName (Pos p1 b1) (Pos p2 b2)
+            compA <- compareAriphm idxVarName a1 a2
+            compB <- compareAriphm idxVarName b1 b2
             comp  <- makeUnifyError p1 p2 $ allEq [snd compA, snd compB]
-            return (Pos p $ ABinOp op1 (pVal $ fst compA) (pVal $ fst compB), comp)
+            return (Pos p $ ABinOp op1 (fst compA) (fst compB), comp)
         `catchE`
             const foundIdx
     (_, _) ->  foundIdx
@@ -164,7 +164,7 @@ compareAriphm idxVarName pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
         foundIdx = return (idxVar, Just(pe1, pe2))
 
 compareParts :: String -> AlignDescrPos -> AlignDescrPos
-    -> Except AlignDescrProcessError (AlignDescrPos, Maybe (AlignAriphmExpr, AlignAriphmExpr))
+    -> Except AlignDescrProcessError (AlignDescrPos, Maybe (AlignAriphmExprPos, AlignAriphmExprPos))
 compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
     (ADVar name1 idxs1, ADVar name2 idxs2) -> do
         guardE (ADE ADE_UnequalNames p1 p2) $ name1 == name2
@@ -220,11 +220,11 @@ instance Show AlignDescrLex' where
 
 instance Box p => Show (Loop p) where
     show (Loop block idxV fIdx lIdx sepSp)
-        = "<" ++ show $$ block ++ show sepSp ++ "|" ++ idxV ++ "=" ++ show fIdx ++ ".." ++ show lIdx ++ ">"
+        = "<" ++ show $$ block ++ show sepSp ++ "|" ++ idxV ++ "=" ++ show $$ fIdx ++ ".." ++ show $$ lIdx ++ ">"
 
 instance Box p => Show (AlignDescr' p) where
     show (ADVar name idxs) = name ++ concatMap h idxs
-        where h = \i -> "[" ++ show i ++ "]"
+        where h = \i -> "[" ++ show $$ i ++ "]"
     show (ALoop l)         = show l -- show e ++ ".." ++ show e'
     show (AString s)       = show s
     show (ABlock es )      = "{" ++ concatMap (show $$) es ++ "}"
@@ -285,11 +285,11 @@ data AlignDescrProcessErrorType
     | ADE_UnequalSpaces        
     | ADE_UnequalStrings
     | ADE_UnequalOperations
-    | ADE_UnifyError          [(AlignAriphmExpr, AlignAriphmExpr)]
+    | ADE_UnifyError          [(AlignAriphmExprPos, AlignAriphmExprPos)]
     | ADE_IdenticalBeginEnd    
     | ADE_UnknownError
 
-makeUnifyError :: [PosSegm] -> [PosSegm] -> Either [(AlignAriphmExpr, AlignAriphmExpr)] a -> Except AlignDescrProcessError a
+makeUnifyError :: [PosSegm] -> [PosSegm] -> Either [(AlignAriphmExprPos, AlignAriphmExprPos)] a -> Except AlignDescrProcessError a
 makeUnifyError _ _   (Right val)  = return val
 makeUnifyError p1 p2 (Left descr) = throwE $ ADE (ADE_UnifyError descr) p1 p2
 
