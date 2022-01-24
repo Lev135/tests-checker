@@ -1,8 +1,8 @@
 module TestAlign (
     AlignSpaces, 
     AlignDescrLex' (..), AlignDescrLex,
-    Loop (..), AlignDescr' (..), AlignDescr, AlignDescrSp,
-    readDescr
+    -- Loop (..), AlignDescr' (..), AlignDescr, AlignDescrSp,
+    -- readDescr
 )   where
 
 import TestAlignAriphm
@@ -17,7 +17,7 @@ import Utils
       lineSpaces1,
       map2,
       maybeToExcept,
-      vSpaces1,
+      vSpace,
       withPosP,
       Parser,
       Pos(..),
@@ -40,54 +40,57 @@ data AlignSpaces = ANoSpace | ASpace | ANewLine
     deriving Eq
 
 data AlignDescrLex'
-    = ALVar        String [AlignAriphmExpr] AlignSpaces
-    | ALLoop       AlignDescrLex AlignDescrLex
-    | ALString     String AlignSpaces
-    | ALBlock      [AlignDescrLex] AlignSpaces
+    = ALVar        String [AlignAriphmExpr]
+    | ALLoop       AlignDescrLex (Pos AlignSpaces) (Pos AlignSpaces) AlignDescrLex
+    | ALString     String
+    | ALBlock      [AlignDescrLex]
+    | ALSpaces     AlignSpaces
     deriving Eq
 
 type AlignDescrLex = Pos AlignDescrLex'
 
 alignP :: Parser [AlignDescrLex]
-alignP = many (try vLoopP <|> try vTermP)
-
-vTermP :: Parser AlignDescrLex
-vTermP = withPosP $ ALBlock <$> lineP <*> vSpacesP
---    <|> ALBlock <$> betweenCh '{' '}' alignP <*> vSpacesP
+alignP = concat <$> many (((:[]) <$> try vLoopP <|> try lineP) <> ((:[]) <$> newLineP))
+    where newLineP  = withPosP (ALSpaces <$> vSpacesP)
 
 vSpacesP :: Parser AlignSpaces
-vSpacesP = ANewLine <$ vSpaces1
+vSpacesP = ANewLine <$ vSpace
 
 vLoopP :: Parser AlignDescrLex
 vLoopP = withPosP (ALLoop
-    <$> vTermP
-    <*  string ".." <* vSpaces1
-    <*> vTermP
+        <$> withPosP (ALBlock <$> lineP)
+        <*> withPosP vSpacesP <* string ".." <*> withPosP vSpacesP
+        <*> withPosP (ALBlock <$> lineP)
     ) <?> "vertical loop"
 
 lineP :: Parser [AlignDescrLex]
-lineP = many (try hLoopP <|> try termP)
+lineP = many (try hLoopP <|> try termP <|> spP) 
     <?> "line"
+    where 
+        spP = withPosP $ ALSpaces <$> (ASpace <$ lineSpaces1)
+        
 
 termP :: Parser AlignDescrLex
 termP = withPosP (
-        ALVar <$> many1 letter <*> many indexes <*> lineSpacesP
-    <|> ALString <$> betweenCh '\"' '\"' (many $ satisfy (/= '\"')) <*> lineSpacesP
-    <|> ALString <$> betweenCh '\'' '\'' (many $ satisfy (/= '\'')) <*> lineSpacesP
-    <|> ALBlock  <$> betweenCh '{' '}' lineP <*> lineSpacesP
+        ALVar <$> many1 letter <*> many indexes
+    <|> ALString <$> betweenCh '\"' '\"' (many $ satisfy (/= '\"'))
+    <|> ALString <$> betweenCh '\'' '\'' (many $ satisfy (/= '\''))
+    <|> ALBlock  <$> betweenCh '{' '}' lineP -- lineP
         ) <?> "term"
     where
         indexes = betweenCh '[' ']' (lineSpaces *> ariphmExprP)
 
-lineSpacesP :: Parser AlignSpaces
-lineSpacesP = ASpace <$ lineSpaces1 <|> pure ANoSpace
-
 hLoopP :: Parser AlignDescrLex
 hLoopP = withPosP (ALLoop
     <$> termP
-    <*  string ".." <* lineSpaces
+    <*> spP <*  string ".." <*> spP
     <*> termP
     ) <?> "horizontal loop"
+    where
+        spP = withPosP $ ASpace <$ lineSpaces1 <|> pure ANoSpace
+
+pp :: Parser a -> String -> Either ParseError a
+pp p = parse (p <* eof) ""
 
 -- Processing
 
@@ -106,39 +109,30 @@ data AlignDescr'
     = ADVar        String [AlignAriphmExpr]
     | ALoop        Loop
     | AString      String
-    | ABlock       [AlignDescrSp]
+    | ABlock       [AlignDescr]
+    | ASpaces      AlignSpaces
 
 type AlignDescr = Pos AlignDescr'
 
-data AlignDescrSp = AlignDescrSp AlignDescr AlignSpaces
-
-makeDescr :: AlignDescrLex -> Except AlignDescrProcessError  AlignDescrSp
+makeDescr :: AlignDescrLex -> Except AlignDescrProcessError  AlignDescr
 makeDescr = makeDescrImpl 0
 
-makeDescrImpl :: Int -> AlignDescrLex -> Except AlignDescrProcessError AlignDescrSp
-makeDescrImpl lvl (Pos p (ALVar name idxs sp)) = return $ AlignDescrSp (Pos p $ ADVar name idxs) sp
-makeDescrImpl lvl (Pos p (ALString str sp))    = return $ AlignDescrSp (Pos p $ AString str) sp
-makeDescrImpl lvl (Pos p (ALBlock es sp))      = flip AlignDescrSp sp. Pos p . ABlock <$> mapM (makeDescrImpl lvl) es
-makeDescrImpl lvl (Pos p (ALLoop b1 b2))       = do
-                    (AlignDescrSp b1' sepSp) <- makeDescrImpl lvl' b1
-                    (AlignDescrSp b2' eSp)   <- makeDescrImpl lvl' b2
+makeDescrImpl :: Int -> AlignDescrLex -> Except AlignDescrProcessError AlignDescr
+makeDescrImpl lvl (Pos p (ALVar name idxs)) = return $ Pos p $ ADVar name idxs
+makeDescrImpl lvl (Pos p (ALString str))    = return $ Pos p $ AString str
+makeDescrImpl lvl (Pos p (ALBlock es))      = Pos p . ABlock <$> mapM (makeDescrImpl lvl) es
+makeDescrImpl lvl (Pos p (ALSpaces sp))     = return $ Pos p $ ASpaces sp
+makeDescrImpl lvl (Pos p (ALLoop b1 (Pos p1 sepSp1) (Pos p2 sepSp2) b2))    = do
+                    guardE (ADE ADE_UnequalSpaces p1 p2) $ sepSp1 == sepSp2 
+                    b1' <- makeDescrImpl lvl' b1
+                    b2' <- makeDescrImpl lvl' b2
                     (block, mIs) <- compareParts idxVar b1' b2'
                     (fI, lI) <- maybeToExcept (ADE ADE_IdenticalBeginEnd (pPos b1') (pPos b2')) mIs
-                    let loop = Pos p . ALoop $ Loop block idxVar fI lI sepSp
-                    return $ AlignDescrSp  loop eSp
+                    let loop = Pos p . ALoop $ Loop block idxVar fI lI sepSp1
+                    return loop
                 where
                     lvl' = lvl + 1
                     idxVar = varByLvl lvl
-
-comparePartsSp :: String -> AlignDescrSp -> AlignDescrSp
-    -> Except AlignDescrProcessError (AlignDescrSp, Maybe (AlignAriphmExpr, AlignAriphmExpr))
-comparePartsSp idxVar (AlignDescrSp e1 sp1) (AlignDescrSp e2 sp2)
-     = do
-        guardE (ADE ADE_UnequalSpaces (pPos e1) (pPos e2)) $ sp1 == sp2
-        compPart <- compareParts idxVar e1 e2
-        let comp = snd compPart
-            part = fst compPart
-        return (AlignDescrSp part sp1, comp)
 
 compareAriphm :: String -> AlignAriphmExpr -> AlignAriphmExpr
     -> Except AlignDescrProcessError (AlignAriphmExpr, Maybe (AlignAriphmExpr, AlignAriphmExpr))
@@ -193,10 +187,13 @@ compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
         guardE (ADE ADE_UnequalStrings p1 p2) $ s1 == s2
         return (Pos p $ AString s1, Nothing)
     (ABlock b1, ABlock b2) -> do
-        compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (comparePartsSp idxVar) b1 b2
+        compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (compareParts idxVar) b1 b2
         comps <- sequence compMaybes
         comp <- makeUnifyError p1 p2 $ allEq $ map snd comps
         return (Pos p $ ABlock $ map fst comps, comp)
+    (ASpaces sp1, ASpaces sp2) -> do
+        guardE (ADE ADE_UnequalSpaces p1 p2) $ sp1 == sp2
+        return (Pos p $ ASpaces sp1, Nothing)
     (_, _) ->  throwE (ADE ADE_UnequalBlockTypes p1 p2)
     where
         p = p1 <> p2
@@ -210,11 +207,12 @@ instance Show AlignSpaces where
     show ANewLine = "\\n"
 
 instance Show AlignDescrLex' where
-    show (ALVar name idxs sp) = name ++ concatMap h idxs ++ show sp
+    show (ALVar name idxs) = name ++ concatMap h idxs
         where h = \i -> "[" ++ show i ++ "]"
-    show (ALLoop e e')        = show e ++ ".." ++ show e'
-    show (ALString s sp)      = show s ++ show sp
-    show (ALBlock es sp)      = "{" ++ concatMap show es ++ "}" ++ show sp
+    show (ALLoop e sp1 sp2 e')  = show e ++ show sp1 ++ ".." ++ show sp2 ++ show e'
+    show (ALString s)           = show s
+    show (ALBlock es)           = "{" ++ concatMap show es ++ "}"
+    show (ALSpaces sp)          = show sp
 
 instance Show Loop where
     show (Loop block idxV fIdx lIdx sepSp)
@@ -226,11 +224,9 @@ instance Show AlignDescr' where
     show (ALoop l)         = show l -- show e ++ ".." ++ show e'
     show (AString s)       = show s
     show (ABlock es )      = "{" ++ concatMap show es ++ "}"
+    show (ASpaces sp)      = show sp
 
-instance Show AlignDescrSp where
-    show (AlignDescrSp e sp) = show e ++ show sp
-
-readDescr :: String -> Except String [AlignDescrSp]
+readDescr :: String -> Except String [AlignDescr]
 readDescr s = do
     lex <- case parse (alignP <* eof) "" s of
       Left  e ->    throwE $ "ParseError: " ++ show e
@@ -340,8 +336,8 @@ main = mapM_ helper
      , "{a[1][1]..a[1][K]}..{a[N][1] .. a[N][K]}\n")
     , ("Одинаковые начало и конец цикла"
      , "a[1]..a[1]\n")
-    , (""
-     , "a[1][1]..a[1][n]\n..\na[n][2]..a[n][n]\n"
+    , ("Разные пробелы перед и после .."
+     , "a[1] ..a[n]\n"
      )
     ]
     where

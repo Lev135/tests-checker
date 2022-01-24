@@ -1,5 +1,5 @@
 module Utils (
-    Parser, betweenCh, lineSpaces, lineSpaces1, vSpaces1,
+    Parser, betweenCh, lineSpaces, lineSpaces1, vSpace,
     allEq, map2,
     Pos (..), PosSegm, makePos, withPosP,
     maybeToExcept, guardE
@@ -22,8 +22,8 @@ lineSpaces = many $ oneOf " \t"
 lineSpaces1 :: Parser [Char]
 lineSpaces1 = many1 $ oneOf " \t"
 
-vSpaces1 :: Parser Char
-vSpaces1 = lineSpaces *> endOfLine <* lineSpaces
+vSpace :: Parser Char
+vSpace = endOfLine
 
 -- | @ 
 -- allEq [Just 1, Nothing, Just 1] == Just Just 1
