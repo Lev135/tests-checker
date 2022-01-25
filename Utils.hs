@@ -1,18 +1,19 @@
 module Utils (
-    Parser, betweenCh, lineSpaces, lineSpaces1, vSpace,
-    allEq, map2,
-    Box (..), ($$), (=<.<), Wrap, 
+    Parser, betweenCh, lineSpaces, lineSpaces1, vSpace, parseAll, numberP,
+    allEq, map2, concatM,
+    Box (..), ($$), (=<.<), Wrap,
     Pos (..), PosSegm, makePos, withPosP,
     maybeToExcept, guardE
 ) where
 
 import Text.Parsec
-    ( char, endOfLine, oneOf, between, many1, many, Parsec, SourcePos, getPosition )
+    ( char, endOfLine, oneOf, between, many1, many, Parsec, SourcePos, getPosition, ParseError, parse, eof, digit )
 import Data.List (group, nub)
 import Data.Maybe (catMaybes)
 import Control.Monad.Trans.Except (Except, throwE)
+import Control.Monad ((>=>))
 
-type Parser t = Parsec String () t
+type Parser = Parsec String ()
 
 betweenCh :: Char -> Char -> Parser a -> Parser a
 betweenCh a b = between (char a) (char b)
@@ -25,6 +26,19 @@ lineSpaces1 = many1 $ oneOf " \t"
 
 vSpace :: Parser Char
 vSpace = endOfLine
+
+numberP :: Parser Int
+numberP = read <$> many1 digit 
+
+parseAll :: Parser a -> String -> Either ParseError  a
+parseAll p = parse (p <* eof) ""
+
+
+-- |Compose a list of monadic actions into one action.  Composes using
+-- ('>=>') - that is, the output of each action is fed to the input of
+-- the one after it in the list.
+concatM :: (Monad m) => [a -> m a] -> (a -> m a)
+concatM = foldr (>=>) return
 
 -- | @ 
 -- allEq [Just 1, Nothing, Just 1] == Just Just 1

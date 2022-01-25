@@ -93,9 +93,6 @@ hLoopP = withPosP (ALLoop
     where
         spP = withPosP $ ASpace <$ lineSpaces1 <|> pure ANoSpace
 
-pp :: Parser a -> String -> Either ParseError a
-pp p = parse (p <* eof) ""
-
 -- Processing
 
 varByLvl :: Int -> String

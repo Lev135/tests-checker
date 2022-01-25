@@ -1,6 +1,8 @@
 module TestAlignAriphm (
     AlignAriphmOp (..), Var (..), AlignAriphmExprPos (..), AlignAriphmExpr' (..),
-    ariphmExprP, ariphmTermP, varP
+    ariphmExprP, ariphmTermP, varP,
+    VarName (..), Indexes (..), Tmp (..), EvalAriphmError (..),
+    eval
 ) where
 
 import Control.Applicative ((<|>), Alternative (many))
@@ -10,8 +12,9 @@ import Text.Parsec.Char ( spaces )
 import Control.Monad.Combinators.Expr
     ( makeExprParser, Operator(InfixL, InfixR) )
 import Text.Parsec.Token (GenTokenParser(parens, integer))
-import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh)
+import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP)
 import Data.Function (on)
+import Control.Monad.Trans.Except (Except)
 
 data AlignAriphmOp
     = ASum | ADiff | ADiv | AProd | APow
@@ -59,7 +62,7 @@ ariphmExprP = makeExprParser (ariphmTermP <* lineSpaces) operators <* lineSpaces
 
 ariphmTermP :: Parser AlignAriphmExprPos
 ariphmTermP = between (char '(') (char ')') ariphmExprP
-    <|> withPosP (AConst . read <$> many1 digit)
+    <|> withPosP (AConst <$> numberP)
     <|> withPosP (AVar <$> varP)
     <?> "term"
 
@@ -86,3 +89,29 @@ tmp pg = do
     g <- withPosP pg
     let g' a b = Pos (pPos g) $ pVal g a b
     return g'
+
+type VarName = String
+type Indexes = [Int]
+
+type Tmp = [((VarName, Indexes), Int)]
+
+data EvalAriphmError = EAE_UninitializedVar VarName Indexes
+    deriving Show
+
+eval :: Tmp -> AlignAriphmExprPos -> Except EvalAriphmError Int
+eval tmp pe = case pVal pe of
+    AVar (Var s idxs) -> do
+        idxs' <- mapM (eval tmp) idxs
+        maybeToExcept (EAE_UninitializedVar s idxs') $ lookup (s, idxs') tmp
+    AConst n ->
+        return n
+    ABinOp op pe1 pe2 -> do
+        n1 <- eval tmp pe1
+        n2 <- eval tmp pe2
+        let op' = case op of
+                        ASum -> (+)
+                        ADiff -> (-)
+                        ADiv -> div
+                        AProd -> (*)
+                        APow -> (^)
+        return $ n1 `op'` n2
