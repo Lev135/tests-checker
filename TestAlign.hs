@@ -1,8 +1,8 @@
 module TestAlign (
     AlignSpaces, 
     AlignDescrLex' (..), AlignDescrLex,
-    -- Loop (..), AlignDescr' (..), AlignDescr, AlignDescrSp,
-    -- readDescr
+    Loop (..), AlignDescr' (..), AlignDescrPos,
+    readDescr
 )   where
 
 import TestAlignAriphm
@@ -152,7 +152,7 @@ compareAriphm idxVarName pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
             guardE (ADE ADE_UnequalOperations p1 p2) $ op1 == op2
             compA <- compareAriphm idxVarName a1 a2
             compB <- compareAriphm idxVarName b1 b2
-            comp  <- makeUnifyError p1 p2 $ allEq [snd compA, snd compB]
+            comp  <- makeUnifyError $ allEq [snd compA, snd compB]
             return (Pos p $ ABinOp op1 (fst compA) (fst compB), comp)
         `catchE`
             const foundIdx
@@ -170,7 +170,7 @@ compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
         guardE (ADE ADE_UnequalNames p1 p2) $ name1 == name2
         compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (compareAriphm idxVar) idxs1 idxs2
         comps <- sequence compMaybes
-        comp <- makeUnifyError p1 p2 $ allEq $ map snd comps
+        comp <- makeUnifyError $ allEq $ map snd comps
         let var = Pos p $ ADVar name1 $ map fst comps
         return (var, comp)
     (ALoop l1, ALoop l2) -> do
@@ -179,7 +179,7 @@ compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
         compBlock <- compareParts  idxVar (lBlock  l1) (lBlock  l2)
         compFIdx  <- compareAriphm idxVar (lFirstI l1) (lFirstI l2)
         compLIdx  <- compareAriphm idxVar (lLastI  l1) (lLastI  l2)
-        comp <- makeUnifyError p1 p2 $ allEq [snd compBlock, snd compFIdx, snd compLIdx]
+        comp <- makeUnifyError $ allEq [snd compBlock, snd compFIdx, snd compLIdx]
         let block  = fst compBlock
             idxVar'= lIdxVar l1
             fIdx   = fst compFIdx
@@ -193,7 +193,7 @@ compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
     (ABlock b1, ABlock b2) -> do
         compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (compareParts idxVar) b1 b2
         comps <- sequence compMaybes
-        comp <- makeUnifyError p1 p2 $ allEq $ map snd comps
+        comp <- makeUnifyError $ allEq $ map snd comps
         return (Pos p $ ABlock $ map fst comps, comp)
     (ASpaces sp1, ASpaces sp2) -> do
         guardE (ADE ADE_UnequalSpaces p1 p2) $ sp1 == sp2
@@ -289,9 +289,12 @@ data AlignDescrProcessErrorType
     | ADE_IdenticalBeginEnd    
     | ADE_UnknownError
 
-makeUnifyError :: [PosSegm] -> [PosSegm] -> Either [(AlignAriphmExprPos, AlignAriphmExprPos)] a -> Except AlignDescrProcessError a
-makeUnifyError _ _   (Right val)  = return val
-makeUnifyError p1 p2 (Left descr) = throwE $ ADE (ADE_UnifyError descr) p1 p2
+makeUnifyError :: Either [(AlignAriphmExprPos, AlignAriphmExprPos)] a -> Except AlignDescrProcessError a
+makeUnifyError (Right val)  = return val
+makeUnifyError (Left descr) = throwE $ ADE (ADE_UnifyError descr) p1 p2
+    where 
+        p1 = concatMap (pPos . fst) descr
+        p2 = concatMap (pPos . snd) descr
 
 data AlignDescrProcessError = ADE AlignDescrProcessErrorType [PosSegm] [PosSegm]
     deriving Show
@@ -343,15 +346,17 @@ main = mapM_ helper
     , ("Разные пробелы перед и после .."
      , "a[1] ..a[n]\n"
      )
+    , ("", "{a[1+1] a[1+k]}..{a[1+n] a[1 + n]}\n")   
     ]
-    where
-        helper (msg, inp)= do
-            putStrLn msg
-            putStrLn "input data"
-            mapM_ (\(i, s) -> putStrLn $ show i ++ ".\t" ++ s) $ zip [1..] $ lines inp
-            putStrLn "output data"
-            let outp = readDescr inp
-            case runExcept outp of
-              Left  e      -> putStrLn e
-              Right descrs -> putStrLn $ concatMap ((++"\n") . show) descrs
-            putStrLn "-------------------\n"
+
+helper :: (String, String) -> IO ()
+helper (msg, inp)= do
+    putStrLn msg
+    putStrLn "input data"
+    mapM_ (\(i, s) -> putStrLn $ show i ++ ".\t" ++ s) $ zip [1..] $ lines inp
+    putStrLn "output data"
+    let outp = readDescr inp
+    case runExcept outp of
+        Left  e      -> putStrLn e
+        Right descrs -> putStrLn $ concatMap show descrs
+    putStrLn "-------------------\n"
