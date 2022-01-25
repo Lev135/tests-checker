@@ -18,14 +18,20 @@ makeParser :: [AlignDescrPos] -> Parser Tmp
 makeParser = flip makeParserImpl' []
 
 makeParserImpl' :: [AlignDescrPos] -> Tmp -> Parser Tmp
-makeParserImpl' pes = concatM (makeParserImpl <$> pes)
--- a -> m (p a) -> 
+makeParserImpl' pes tmp = foldl h (return []) (makeParserImpl <$> pes)
+    where
+        h :: Parser Tmp -> (Tmp -> Parser Tmp) -> Parser Tmp
+        h a f = do
+            a' <- a
+            b  <- f (a' <> tmp)
+            return $ a' <> b
+
 makeParserImpl :: AlignDescrPos -> Tmp -> Parser Tmp
 makeParserImpl pe tmp = case pVal pe of
     ADVar (Var s idxs) -> do
         case runExcept $ mapM (eval tmp) idxs of
             Left  e     -> parserFail $ show e
-            Right idxs' -> (\n -> ((s, idxs'), n) : tmp) <$> (numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs')
+            Right idxs' -> (\n -> [((s, idxs'), n)]) <$> (numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs')
     ALoop l -> do
         let eis = do
             fI <- eval tmp $ lFirstI l
@@ -36,12 +42,12 @@ makeParserImpl pe tmp = case pVal pe of
             Left  e         -> parserFail $ show e
             Right (is, lI)  -> concat <$> forM is (\i -> do
                     let tmp' = ((lIdxVar l, []), i) : tmp
-                    makeParserImpl (lBlock l) tmp' 
+                    makeParserImpl (lBlock l) tmp'
                         <* when (i < lI) (spacesParser (lSepSp l))
                 )
-    AString s -> tmp <$ string s
+    AString s   -> [] <$ string s
     ABlock poss -> makeParserImpl' poss tmp
-    ASpaces sp -> tmp <$ spacesParser sp
+    ASpaces sp  -> [] <$ spacesParser sp
 
 spacesParser :: AlignSpaces -> Parser ()
 spacesParser ANoSpace   = return ()
@@ -68,4 +74,15 @@ helper (msg, inp) test = do
     putStrLn "-------------------\n"
 
 main :: IO ()
-main = helper ("", "n\nc[1] a[1][1] .. a[1][c[1]]\n..\nc[n] a[n][1] .. a[n][c[n]]\n") "3\n3 1 2 3\n1 1\n0 \n"
+main = mapM_ h $ zip [1..] [
+        (
+            "n\nc[1] a[1][1] .. a[1][c[1]]\n..\nc[n] a[n][1] .. a[n][c[n]]\n",
+            "3\n3 1 2 3\n5 10 11 12 13 14\n0 \n"
+        ), (
+            "n\na[1][1] .. a[1][n]\n..\na[n][1] .. a[n][n]\n",
+            "3\n2 3 1\n1 2 3\n2 3 4\n"
+        )
+    ]
+    where h (i, (inp, test)) = do
+            putStrLn $ "\t\t(" ++ show i ++ ")"
+            helper ("", inp) test
