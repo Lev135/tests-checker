@@ -7,4 +7,4 @@ l[q] r[q]
 ===
 n       : int[1, 10^5]
 q       : int[1, 10^4]
-l, r    : int[1, n)
+l, r    : int[1, n]
