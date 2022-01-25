@@ -244,15 +244,14 @@ makeProcessErrorMsg sourceLines (ADE errT segms1 segms2)
                                 show (n + 1) ++ ".\t"
                             ++  sourceLines !! n ++ "\n"
                             ++  "\t"
-                            ++  makeMask2 (lineLen n) (lineSegms n) ++ "\n"
+                            ++  mask n ++ "\n"
     where
-        segms       = segms1 <> segms2
-        lines       = nub . sort  . concatMap segmLines $ segms
+        lines       = nub . sort  . concatMap segmLines $ segms1 <> segms2
 
         segmLines (p1, p2) = [sourceLine p1 - 1 .. (sourceLine p2 - 1) `min` (length sourceLines - 1)]
-        makeMask1 = makeMask '^' '-'
-        makeMask2 = makeMask '^' '~'
-        lineSegms n = catMaybes $ segmInLine n (lineLen n) <$> segms
+        mask n = composeMasks (h '^' '-' segms1 n) (h '*' '~' segms2 n)
+        h bCh iCh segms n = makeMask bCh iCh (lineLen n) (lineSegms segms n)
+        lineSegms segms n = catMaybes $ segmInLine n (lineLen n) <$> segms
         lineLen   n = length $ sourceLines !! n
 
 segmInLine :: Int -> Int -> PosSegm -> Maybe (Int, Int)
@@ -276,6 +275,12 @@ makeMask borderCh innerCh len ixs = flip map [1..len] $ \i ->
         containes i (l, r) = l <= i && i < r
         begEnd    i (l, r) = l == i || i == r - 1
 
+composeMasks :: [Char] -> [Char] -> [Char]
+composeMasks m1 m2 = uncurry h <$> zip m1 m2
+    where
+        h ' '  c   = c
+        h  c  ' '  = c
+        h  _   _   = '#'
 -- ERRORS
 
 data AlignDescrProcessErrorType
