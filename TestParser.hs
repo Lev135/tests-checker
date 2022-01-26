@@ -1,55 +1,55 @@
 module TestParser where
 
-import TestAlign
-    ( AlignSpaces(ANewLine, ASpace, ANoSpace),
-      AlignDescr'(ASpaces, ABlock, AString, ALoop, ADVar),
+import Layout
+    ( LayoutSpaces(ANewLine, ASpace, ANoSpace),
+      LayoutDescr(LSpaces, LBlock, LString, LLoop, LVar),
       Loop(lLastI, lFirstI, lIdxVar, lBlock, lSepSp),
       readDescr,
-      AlignDescrPos )
+      LayoutDescrPos )
 import Utils (Parser, Pos (pVal), concatM, parseAll, numberP)
 import Text.Parsec.Char (string, char, newline)
 import Control.Monad.Trans.Except (runExcept, Except, ExceptT (ExceptT))
-import TestAlignAriphm (Var (Var), Tmp, eval, EvalAriphmError)
+import Ariphm (Var (Var), VarValues, eval, EvalAriphmError)
 import Text.Parsec.Prim (Parsec, parserFail, (<?>))
 import Control.Monad (forM, when)
 
 
-makeParser :: [AlignDescrPos] -> Parser Tmp
+makeParser :: [LayoutDescrPos] -> Parser VarValues
 makeParser = flip makeParserImpl' []
 
-makeParserImpl' :: [AlignDescrPos] -> Tmp -> Parser Tmp
-makeParserImpl' pes tmp = foldl h (return []) (makeParserImpl <$> pes)
+makeParserImpl' :: [LayoutDescrPos] -> VarValues -> Parser VarValues
+makeParserImpl' pes vals = foldl h (return []) (makeParserImpl <$> pes)
     where
-        h :: Parser Tmp -> (Tmp -> Parser Tmp) -> Parser Tmp
+        h :: Parser VarValues -> (VarValues -> Parser VarValues) -> Parser VarValues
         h a f = do
             a' <- a
-            b  <- f (a' <> tmp)
+            b  <- f (a' <> vals)
             return $ a' <> b
 
-makeParserImpl :: AlignDescrPos -> Tmp -> Parser Tmp
-makeParserImpl pe tmp = case pVal pe of
-    ADVar (Var s idxs) -> do
-        case runExcept $ mapM (eval tmp) idxs of
+makeParserImpl :: LayoutDescrPos -> VarValues -> Parser VarValues
+makeParserImpl pe vals = case pVal pe of
+    LVar (Var s idxs) -> do
+        case runExcept $ mapM (eval vals) idxs of
             Left  e     -> parserFail $ show e
             Right idxs' -> (\n -> [((s, idxs'), n)]) <$> (numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs')
-    ALoop l -> do
+    LLoop l -> do
         let eis = do
-            fI <- eval tmp $ lFirstI l
-            lI <- eval tmp $ lLastI l
+            fI <- eval vals $ lFirstI l
+            lI <- eval vals $ lLastI l
             -- TODO : check for correct bounds
             return ([fI .. lI], lI)
         case runExcept eis of
             Left  e         -> parserFail $ show e
             Right (is, lI)  -> concat <$> forM is (\i -> do
-                    let tmp' = ((lIdxVar l, []), i) : tmp
-                    makeParserImpl (lBlock l) tmp'
+                    let vals' = ((lIdxVar l, []), i) : vals
+                    makeParserImpl (lBlock l) vals'
                         <* when (i < lI) (spacesParser (lSepSp l))
                 )
-    AString s   -> [] <$ string s
-    ABlock poss -> makeParserImpl' poss tmp
-    ASpaces sp  -> [] <$ spacesParser sp
+    LString s   -> [] <$ string s
+    LBlock poss -> makeParserImpl' poss vals
+    LSpaces sp  -> [] <$ spacesParser sp
 
-spacesParser :: AlignSpaces -> Parser ()
+spacesParser :: LayoutSpaces -> Parser ()
 spacesParser ANoSpace   = return ()
 spacesParser ASpace     = () <$ char ' '
 spacesParser ANewLine   = () <$ newline
@@ -70,7 +70,7 @@ helper (msg, inp) test = do
             putStrLn test
             case parseAll p test of
                 Left  e     -> print e
-                Right tmp   -> mapM_ print tmp
+                Right vals  -> mapM_ print vals
     putStrLn "-------------------\n"
 
 main :: IO ()

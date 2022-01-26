@@ -1,44 +1,43 @@
-module TestAlignAriphm (
-    AlignAriphmOp (..), Var (..), AlignAriphmExprPos (..), AlignAriphmExpr' (..),
+module Ariphm (
+    AriphmOp (..), VarName (..), Var (..), AriphmExprPos (..), AriphmExpr (..),
     ariphmExprP, ariphmTermP, varP,
-    VarName (..), Indexes (..), Tmp (..), EvalAriphmError (..),
+    VarValues (..), EvalAriphmError (..),
     eval
 ) where
 
 import Control.Applicative ((<|>), Alternative (many))
-import Text.Parsec
-    ( char, between, digit, letter, many1, Parsec, (<?>))
+import Text.Parsec ( char, between, digit, letter, many1, Parsec, (<?>))
 import Text.Parsec.Char ( spaces )
-import Control.Monad.Combinators.Expr
-    ( makeExprParser, Operator(InfixL, InfixR) )
-import Text.Parsec.Token (GenTokenParser(parens, integer))
-import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP)
+import Control.Monad.Combinators.Expr ( makeExprParser, Operator(InfixL, InfixR) )
+import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP, Parser)
 import Data.Function (on)
 import Control.Monad.Trans.Except (Except)
 
-data AlignAriphmOp
+data AriphmOp
     = ASum | ADiff | ADiv | AProd | APow
     deriving Eq
 
-data Var p = Var String [Wrap p AlignAriphmExpr']
+type VarName = String
+
+data Var p = Var VarName [Wrap p AriphmExpr]
 
 instance (Box p) => Eq (Var p) where
     (Var s1 ixs1) == (Var s2 ixs2) = s1 == s2 && and (zipWith ((==) `on` unBox) ixs1 ixs2)
 
-data AlignAriphmExpr' p
+data AriphmExpr p
     = AVar     (Var p)
     | AConst   Int
-    | ABinOp   AlignAriphmOp (Wrap p AlignAriphmExpr') (Wrap p AlignAriphmExpr')
+    | ABinOp   AriphmOp (Wrap p AriphmExpr) (Wrap p AriphmExpr)
 
-instance (Box p) => Eq (AlignAriphmExpr' p) where
+instance (Box p) => Eq (AriphmExpr p) where
     (AVar v1) == (AVar v2) = v1 == v2
     (AConst c1) == (AConst c2) = c1 == c2
     (ABinOp op1 e1 e1') == (ABinOp op2 e2 e2') = op1 == op2 && unBox e1 == unBox e2 && unBox e1' == unBox e2'
     _ == _ = False
 
-type AlignAriphmExprPos = Wrap Pos AlignAriphmExpr'
+type AriphmExprPos = Wrap Pos AriphmExpr
 
-instance Show AlignAriphmOp where
+instance Show AriphmOp where
     show ASum  = "+"
     show ADiff = "-"
     show AProd = "*"
@@ -49,18 +48,16 @@ instance Box p => Show (Var p) where
     show (Var s idxs) = s ++ concatMap h idxs
         where h = \i -> "[" ++ show $$ i ++ "]"
 
-instance Box p => Show (AlignAriphmExpr' p) where
+instance Box p => Show (AriphmExpr p) where
     show (AVar v)           = show v
     show (AConst n)         = show n
     show (ABinOp op e e')   = "(" ++ show $$ e ++ " " ++ show op ++ " " ++ show $$ e' ++ ")"
 
-type Parser t = (Parsec String () t)
-
-ariphmExprP :: Parser AlignAriphmExprPos
+ariphmExprP :: Parser AriphmExprPos
 ariphmExprP = makeExprParser (ariphmTermP <* lineSpaces) operators <* lineSpaces
         <?> "expression"
 
-ariphmTermP :: Parser AlignAriphmExprPos
+ariphmTermP :: Parser AriphmExprPos
 ariphmTermP = between (char '(') (char ')') ariphmExprP
     <|> withPosP (AConst <$> numberP)
     <|> withPosP (AVar <$> varP)
@@ -70,7 +67,7 @@ varP :: Parser (Var Pos)
 varP = Var <$> many1 letter <*> many indexes
     where indexes = betweenCh '[' ']' (lineSpaces *> ariphmExprP)
 
-operators :: [[Operator (Parsec String ()) AlignAriphmExprPos]]
+operators :: [[Operator Parser AriphmExprPos]]
 operators = [
         [ InfixR $ tmp (ABinOp APow <$ char '^' <* lineSpaces)
         ],
@@ -81,33 +78,27 @@ operators = [
         , InfixL $ tmp (ABinOp ADiff <$ char '-' <* lineSpaces)
         ]
     ]
+    where
+        tmp pg = do
+            g <- withPosP pg
+            let g' a b = Pos (pPos g) $ pVal g a b
+            return g'
 
+type VarValues = [((VarName, [Int]), Int)]
 
-tmp :: Parser (AlignAriphmExprPos -> AlignAriphmExprPos -> AlignAriphmExpr' Pos)
-     -> Parser (AlignAriphmExprPos -> AlignAriphmExprPos -> AlignAriphmExprPos)
-tmp pg = do
-    g <- withPosP pg
-    let g' a b = Pos (pPos g) $ pVal g a b
-    return g'
-
-type VarName = String
-type Indexes = [Int]
-
-type Tmp = [((VarName, Indexes), Int)]
-
-data EvalAriphmError = EAE_UninitializedVar VarName Indexes
+data EvalAriphmError = EAE_UninitializedVar VarName [Int]
     deriving Show
 
-eval :: Tmp -> AlignAriphmExprPos -> Except EvalAriphmError Int
-eval tmp pe = case pVal pe of
+eval :: VarValues -> AriphmExprPos -> Except EvalAriphmError Int
+eval vals pe = case pVal pe of
     AVar (Var s idxs) -> do
-        idxs' <- mapM (eval tmp) idxs
-        maybeToExcept (EAE_UninitializedVar s idxs') $ lookup (s, idxs') tmp
+        idxs' <- mapM (eval vals) idxs
+        maybeToExcept (EAE_UninitializedVar s idxs') $ lookup (s, idxs') vals
     AConst n ->
         return n
     ABinOp op pe1 pe2 -> do
-        n1 <- eval tmp pe1
-        n2 <- eval tmp pe2
+        n1 <- eval vals pe1
+        n2 <- eval vals pe2
         let op' = case op of
                         ASum -> (+)
                         ADiff -> (-)

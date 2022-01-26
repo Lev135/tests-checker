@@ -1,6 +1,6 @@
 module Main where
 import Control.Monad.Trans.Except (runExcept)
-import TestAlign (readDescr)
+import Layout (readDescr)
 import TestParser (makeParser)
 import Utils (parseAll)
 
@@ -26,7 +26,7 @@ main = do
             let p = makeParser descrs
             case parseAll p test of
                 Left  e     -> print e
-                Right tmp   -> mapM_ h tmp
+                Right vals  -> mapM_ h vals
     where
         h ((name, ixs), v) = putStrLn $ name 
                             ++ concatMap (\i -> "[" ++ show i ++ "]") ixs

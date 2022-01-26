@@ -1,14 +1,14 @@
-module TestAlign (
-    AlignSpaces (..),
-    -- AlignDescrLex' (..), AlignDescrLex,
-    Loop (..), AlignDescr' (..), AlignDescrPos,
+module Layout (
+    LayoutSpaces (..),
+    -- LayoutDescrLex (..), LayoutDescrLexPos,
+    Loop (..), LayoutDescr (..), LayoutDescrPos,
     readDescr
 )   where
 
-import TestAlignAriphm
+import Ariphm
     ( ariphmExprP,
-      AlignAriphmExprPos,
-      AlignAriphmExpr'(ABinOp, AConst, AVar), Var (Var), varP )
+      AriphmExprPos,
+      AriphmExpr(ABinOp, AConst, AVar), Var (Var), varP )
 import Utils
     ( PosSegm,
       withPosP,
@@ -40,52 +40,52 @@ import Data.Maybe (catMaybes)
 import Control.Monad.Trans.Except (Except, except, throwE, catchE, runExcept)
 import Control.Monad.Trans.Maybe (maybeToExceptT)
 
-data AlignSpaces = ANoSpace | ASpace | ANewLine
+data LayoutSpaces = ANoSpace | ASpace | ANewLine
     deriving Eq
 
-data AlignDescrLex'
-    = ALVar        (Var Pos)
-    | ALLoop       AlignDescrLex (Pos AlignSpaces) (Pos AlignSpaces) AlignDescrLex
-    | ALString     String
-    | ALBlock      [AlignDescrLex]
-    | ALSpaces     AlignSpaces
+data LayoutDescrLex
+    = LLVar        (Var Pos)
+    | LLLoop       LayoutDescrLexPos (Pos LayoutSpaces) (Pos LayoutSpaces) LayoutDescrLexPos
+    | LLString     String
+    | LLBlock      [LayoutDescrLexPos]
+    | LLSpaces     LayoutSpaces
     deriving Eq
 
-type AlignDescrLex = Pos AlignDescrLex'
+type LayoutDescrLexPos = Pos LayoutDescrLex
 
-alignP :: Parser [AlignDescrLex]
+alignP :: Parser [LayoutDescrLexPos]
 alignP = concat <$> many (((:[]) <$> try vLoopP <|> try lineP) <> ((:[]) <$> newLineP))
-    where newLineP  = withPosP (ALSpaces <$> vSpacesP)
+    where newLineP  = withPosP (LLSpaces <$> vSpacesP)
 
-vSpacesP :: Parser AlignSpaces
+vSpacesP :: Parser LayoutSpaces
 vSpacesP = ANewLine <$ vSpace
 
-vLoopP :: Parser AlignDescrLex
-vLoopP = withPosP (ALLoop
-        <$> withPosP (ALBlock <$> lineP)
+vLoopP :: Parser LayoutDescrLexPos
+vLoopP = withPosP (LLLoop
+        <$> withPosP (LLBlock <$> lineP)
         <*> withPosP vSpacesP <* string ".." <*> withPosP vSpacesP
-        <*> withPosP (ALBlock <$> lineP)
+        <*> withPosP (LLBlock <$> lineP)
     ) <?> "vertical loop"
 
-lineP :: Parser [AlignDescrLex]
+lineP :: Parser [LayoutDescrLexPos]
 lineP = many (try hLoopP <|> try termP <|> spP)
     <?> "line"
     where
-        spP = withPosP $ ALSpaces <$> (ASpace <$ lineSpaces1)
+        spP = withPosP $ LLSpaces <$> (ASpace <$ lineSpaces1)
 
 
-termP :: Parser AlignDescrLex
+termP :: Parser LayoutDescrLexPos
 termP = withPosP (
-        ALVar <$> varP
-    <|> ALString <$> betweenCh '\"' '\"' (many $ satisfy (/= '\"'))
-    <|> ALString <$> betweenCh '\'' '\'' (many $ satisfy (/= '\''))
-    <|> ALBlock  <$> betweenCh '{' '}' lineP -- lineP
+        LLVar <$> varP
+    <|> LLString <$> betweenCh '\"' '\"' (many $ satisfy (/= '\"'))
+    <|> LLString <$> betweenCh '\'' '\'' (many $ satisfy (/= '\''))
+    <|> LLBlock  <$> betweenCh '{' '}' lineP -- lineP
         ) <?> "term"
     where
         indexes = betweenCh '[' ']' (lineSpaces *> ariphmExprP)
 
-hLoopP :: Parser AlignDescrLex
-hLoopP = withPosP (ALLoop
+hLoopP :: Parser LayoutDescrLexPos
+hLoopP = withPosP (LLLoop
     <$> termP
     <*> spP <*  string ".." <*> spP
     <*> termP
@@ -99,37 +99,37 @@ varByLvl :: Int -> String
 varByLvl = (map ('$':) ["i", "j", "k", "l"] !!)
 
 data Loop p = Loop {
-        lBlock   :: Wrap p AlignDescr',
+        lBlock   :: Wrap p LayoutDescr,
         lIdxVar  :: String,
-        lFirstI  :: Wrap p AlignAriphmExpr',
-        lLastI   :: Wrap p AlignAriphmExpr',
-        lSepSp   :: AlignSpaces
+        lFirstI  :: Wrap p AriphmExpr,
+        lLastI   :: Wrap p AriphmExpr,
+        lSepSp   :: LayoutSpaces
     }
 
-data AlignDescr' p
-    = ADVar        (Var p)
-    | ALoop        (Loop p)
-    | AString      String
-    | ABlock       [Wrap p AlignDescr']
-    | ASpaces      AlignSpaces
+data LayoutDescr p
+    = LVar        (Var p)
+    | LLoop        (Loop p)
+    | LString      String
+    | LBlock       [Wrap p LayoutDescr]
+    | LSpaces      LayoutSpaces
 
-type AlignDescrPos = Wrap Pos AlignDescr'
+type LayoutDescrPos = Wrap Pos LayoutDescr
 
-makeDescr :: AlignDescrLex -> Except AlignDescrProcessError AlignDescrPos
+makeDescr :: LayoutDescrLexPos -> Except AlignDescrProcessError LayoutDescrPos
 makeDescr = makeDescrImpl 0
 
-makeDescrImpl :: Int -> AlignDescrLex -> Except AlignDescrProcessError AlignDescrPos
-makeDescrImpl lvl (Pos p (ALVar v))         = return $ Pos p $ ADVar v
-makeDescrImpl lvl (Pos p (ALString str))    = return $ Pos p $ AString str
-makeDescrImpl lvl (Pos p (ALBlock es))      = Pos p . ABlock <$> mapM (makeDescrImpl lvl) es
-makeDescrImpl lvl (Pos p (ALSpaces sp))     = return $ Pos p $ ASpaces sp
-makeDescrImpl lvl (Pos p (ALLoop b1 (Pos p1 sepSp1) (Pos p2 sepSp2) b2))    = do
-                    guardE (ADE ADE_UnequalSpaces p1 p2) $ sepSp1 == sepSp2
+makeDescrImpl :: Int -> LayoutDescrLexPos -> Except AlignDescrProcessError LayoutDescrPos
+makeDescrImpl lvl (Pos p (LLVar v))         = return $ Pos p $ LVar v
+makeDescrImpl lvl (Pos p (LLString str))    = return $ Pos p $ LString str
+makeDescrImpl lvl (Pos p (LLBlock es))      = Pos p . LBlock <$> mapM (makeDescrImpl lvl) es
+makeDescrImpl lvl (Pos p (LLSpaces sp))     = return $ Pos p $ LSpaces sp
+makeDescrImpl lvl (Pos p (LLLoop b1 (Pos p1 sepSp1) (Pos p2 sepSp2) b2))    = do
+                    guardE (ADE LDPE_UnequalSpaces p1 p2) $ sepSp1 == sepSp2
                     b1' <- makeDescrImpl lvl' b1
                     b2' <- makeDescrImpl lvl' b2
                     (block, mIs) <- compareParts idxVar b1' b2'
-                    (fI, lI) <- maybeToExcept (ADE ADE_IdenticalBeginEnd (pPos b1') (pPos b2')) mIs
-                    let loop = Pos p . ALoop $ Loop block idxVarName fI lI sepSp1
+                    (fI, lI) <- maybeToExcept (ADE LDPE_IdenticalBeginEnd (pPos b1') (pPos b2')) mIs
+                    let loop = Pos p . LLoop $ Loop block idxVarName fI lI sepSp1
                     return loop
                 where
                     lvl' = lvl + 1
@@ -137,19 +137,19 @@ makeDescrImpl lvl (Pos p (ALLoop b1 (Pos p1 sepSp1) (Pos p2 sepSp2) b2))    = do
                     idxVar = Var idxVarName []
 
 compareVars :: Var Pos -> Wrap Pos Var -> Wrap Pos Var
-    -> Except AlignDescrProcessError (Wrap Pos Var, Maybe (AlignAriphmExprPos, AlignAriphmExprPos))
+    -> Except AlignDescrProcessError (Wrap Pos Var, Maybe (AriphmExprPos, AriphmExprPos))
 compareVars idxVar (Pos p1 (Var name1 idxs1)) (Pos p2 (Var name2 idxs2))
     = do
-        guardE (ADE ADE_UnequalNames p1 p2) $ name1 == name2
-        compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (compareAriphm idxVar) idxs1 idxs2
+        guardE (ADE LDPE_UnequalNames p1 p2) $ name1 == name2
+        compMaybes <- maybeToExcept (ADE LDPE_UnequalLength p1 p2) $ map2 (compareAriphm idxVar) idxs1 idxs2
         comps <- sequence compMaybes
         comp <- makeUnifyError $ allEq $ map snd comps
         let var = Pos p $ Var name1 $ map fst comps
         return (var, comp)
     where p = p1 <> p2
 
-compareAriphm :: Var Pos -> AlignAriphmExprPos -> AlignAriphmExprPos
-    -> Except AlignDescrProcessError (AlignAriphmExprPos, Maybe (AlignAriphmExprPos, AlignAriphmExprPos))
+compareAriphm :: Var Pos -> AriphmExprPos -> AriphmExprPos
+    -> Except AlignDescrProcessError (AriphmExprPos, Maybe (AriphmExprPos, AriphmExprPos))
 compareAriphm idxVar pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
     (AVar v1, AVar v2) ->
         do
@@ -163,7 +163,7 @@ compareAriphm idxVar pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
                     else foundIdx
     (ABinOp op1 a1 b1, ABinOp op2 a2 b2) ->
         do
-            guardE (ADE ADE_UnequalOperations p1 p2) $ op1 == op2
+            guardE (ADE LDPE_UnequalOperations p1 p2) $ op1 == op2
             compA <- compareAriphm idxVar a1 a2
             compB <- compareAriphm idxVar b1 b2
             comp  <- makeUnifyError $ allEq [snd compA, snd compB]
@@ -177,16 +177,16 @@ compareAriphm idxVar pe1@(Pos p1 e1) pe2@(Pos p2 e2) = case (e1, e2) of
         equal    = return (Pos p e1, Nothing)
         foundIdx = return (idxAVar, Just(pe1, pe2))
 
-compareParts :: Var Pos -> AlignDescrPos -> AlignDescrPos
-    -> Except AlignDescrProcessError (AlignDescrPos, Maybe (AlignAriphmExprPos, AlignAriphmExprPos))
+compareParts :: Var Pos -> LayoutDescrPos -> LayoutDescrPos
+    -> Except AlignDescrProcessError (LayoutDescrPos, Maybe (AriphmExprPos, AriphmExprPos))
 compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
-    (ADVar v1, ADVar v2) -> do
+    (LVar v1, LVar v2) -> do
         comp <- compareVars idxVar (Pos p1 v1) (Pos p2 v2)
-        let var = ADVar <$> fst comp
+        let var = LVar <$> fst comp
         return (var, snd comp)
-    (ALoop l1, ALoop l2) -> do
-        guardE (ADE ADE_UnequalSpaces p1 p2) $ lSepSp l1  == lSepSp l2
-        guardE (ADE ADE_UnknownError  p1 p2) $ lIdxVar l1 == lIdxVar l2 -- should be always true
+    (LLoop l1, LLoop l2) -> do
+        guardE (ADE LDPE_UnequalSpaces p1 p2) $ lSepSp l1  == lSepSp l2
+        guardE (ADE LDPE_UnknownError  p1 p2) $ lIdxVar l1 == lIdxVar l2 -- should be always true
         compBlock <- compareParts  idxVar (lBlock  l1) (lBlock  l2)
         compFIdx  <- compareAriphm idxVar (lFirstI l1) (lFirstI l2)
         compLIdx  <- compareAriphm idxVar (lLastI  l1) (lLastI  l2)
@@ -196,50 +196,50 @@ compareParts idxVar pb1@(Pos p1 b1) pb2@(Pos p2 b2) = case (b1, b2) of
             fIdx   = fst compFIdx
             lIdx   = fst compLIdx
             sepSp  = lSepSp l1
-        let loop = Pos p $ ALoop $ Loop block idxVar' fIdx lIdx sepSp
+        let loop = Pos p $ LLoop $ Loop block idxVar' fIdx lIdx sepSp
         return (loop, comp)
-    (AString s1, AString s2) -> do
-        guardE (ADE ADE_UnequalStrings p1 p2) $ s1 == s2
-        return (Pos p $ AString s1, Nothing)
-    (ABlock b1, ABlock b2) -> do
-        compMaybes <- maybeToExcept (ADE ADE_UnequalLength p1 p2) $ map2 (compareParts idxVar) b1 b2
+    (LString s1, LString s2) -> do
+        guardE (ADE LDPE_UnequalStrings p1 p2) $ s1 == s2
+        return (Pos p $ LString s1, Nothing)
+    (LBlock b1, LBlock b2) -> do
+        compMaybes <- maybeToExcept (ADE LDPE_UnequalLength p1 p2) $ map2 (compareParts idxVar) b1 b2
         comps <- sequence compMaybes
         comp <- makeUnifyError $ allEq $ map snd comps
-        return (Pos p $ ABlock $ map fst comps, comp)
-    (ASpaces sp1, ASpaces sp2) -> do
-        guardE (ADE ADE_UnequalSpaces p1 p2) $ sp1 == sp2
-        return (Pos p $ ASpaces sp1, Nothing)
-    (_, _) ->  throwE (ADE ADE_UnequalBlockTypes p1 p2)
+        return (Pos p $ LBlock $ map fst comps, comp)
+    (LSpaces sp1, LSpaces sp2) -> do
+        guardE (ADE LDPE_UnequalSpaces p1 p2) $ sp1 == sp2
+        return (Pos p $ LSpaces sp1, Nothing)
+    (_, _) ->  throwE (ADE LDPE_UnequalBlockTypes p1 p2)
     where
         p = p1 <> p2
 
 
 -- SHOW
 
-instance Show AlignSpaces where
+instance Show LayoutSpaces where
     show ANoSpace = ""
     show ASpace   = "_"
     show ANewLine = "\\n"
 
-instance Show AlignDescrLex' where
-    show (ALVar v)              = show v
-    show (ALLoop e sp1 sp2 e')  = show e ++ show sp1 ++ ".." ++ show sp2 ++ show e'
-    show (ALString s)           = show s
-    show (ALBlock es)           = "{" ++ concatMap show es ++ "}"
-    show (ALSpaces sp)          = show sp
+instance Show LayoutDescrLex where
+    show (LLVar v)              = show v
+    show (LLLoop e sp1 sp2 e')  = show e ++ show sp1 ++ ".." ++ show sp2 ++ show e'
+    show (LLString s)           = show s
+    show (LLBlock es)           = "{" ++ concatMap show es ++ "}"
+    show (LLSpaces sp)          = show sp
 
 instance Box p => Show (Loop p) where
     show (Loop block idxV fIdx lIdx sepSp)
         = "<" ++ show $$ block ++ show sepSp ++ "|" ++ idxV ++ "=" ++ show $$ fIdx ++ ".." ++ show $$ lIdx ++ ">"
 
-instance Box p => Show (AlignDescr' p) where
-    show (ADVar v)         = show v
-    show (ALoop l)         = show l -- show e ++ ".." ++ show e'
-    show (AString s)       = show s
-    show (ABlock es )      = "{" ++ concatMap (show $$) es ++ "}"
-    show (ASpaces sp)      = show sp
+instance Box p => Show (LayoutDescr p) where
+    show (LVar v)         = show v
+    show (LLoop l)         = show l -- show e ++ ".." ++ show e'
+    show (LString s)       = show s
+    show (LBlock es )      = "{" ++ concatMap (show $$) es ++ "}"
+    show (LSpaces sp)      = show sp
 
-readDescr :: String -> Except String [AlignDescrPos]
+readDescr :: String -> Except String [LayoutDescrPos]
 readDescr s = do
     lex <- case parse (alignP <* eof) "" s of
       Left  e ->    throwE $ "ParseError: " ++ show e
@@ -292,38 +292,38 @@ composeMasks m1 m2 = uncurry h <$> zip m1 m2
         h  _   _   = '#'
 -- ERRORS
 
-data AlignDescrProcessErrorType
-    = ADE_UnequalBlockTypes
-    | ADE_UnequalLength
-    | ADE_UnequalNames
-    | ADE_UnequalSpaces
-    | ADE_UnequalStrings
-    | ADE_UnequalOperations
-    | ADE_UnifyError          [(AlignAriphmExprPos, AlignAriphmExprPos)]
-    | ADE_IdenticalBeginEnd
-    | ADE_UnknownError
+data LayoutDescrProcessErrorType
+    = LDPE_UnequalBlockTypes
+    | LDPE_UnequalLength
+    | LDPE_UnequalNames
+    | LDPE_UnequalSpaces
+    | LDPE_UnequalStrings
+    | LDPE_UnequalOperations
+    | LDPE_UnifyError          [(AriphmExprPos, AriphmExprPos)]
+    | LDPE_IdenticalBeginEnd
+    | LDPE_UnknownError
 
-makeUnifyError :: Either [(AlignAriphmExprPos, AlignAriphmExprPos)] a -> Except AlignDescrProcessError a
+makeUnifyError :: Either [(AriphmExprPos, AriphmExprPos)] a -> Except AlignDescrProcessError a
 makeUnifyError (Right val)  = return val
-makeUnifyError (Left descr) = throwE $ ADE (ADE_UnifyError descr) p1 p2
+makeUnifyError (Left descr) = throwE $ ADE (LDPE_UnifyError descr) p1 p2
     where
         p1 = concatMap (pPos . fst) descr
         p2 = concatMap (pPos . snd) descr
 
-data AlignDescrProcessError = ADE AlignDescrProcessErrorType [PosSegm] [PosSegm]
+data AlignDescrProcessError = ADE LayoutDescrProcessErrorType [PosSegm] [PosSegm]
     deriving Show
 
-instance Show AlignDescrProcessErrorType where
-    show ADE_UnequalBlockTypes{}       = "Block types are unequal"
-    show ADE_UnequalLength{}           = "Block length/index count are unequal"
-    show ADE_UnequalNames{}            = "Variable names are unequal"
-    show ADE_UnequalSpaces{}           = "Spaces are unequal"
-    show ADE_UnequalStrings{}          = "String constants are unequal"
-    show ADE_UnequalOperations{}       = "Binary operations are unequal"
-    show (ADE_UnifyError exprs)        = "Unable to unify these changes:"
+instance Show LayoutDescrProcessErrorType where
+    show LDPE_UnequalBlockTypes{}       = "Block types are unequal"
+    show LDPE_UnequalLength{}           = "Block length/index count are unequal"
+    show LDPE_UnequalNames{}            = "Variable names are unequal"
+    show LDPE_UnequalSpaces{}           = "Spaces are unequal"
+    show LDPE_UnequalStrings{}          = "String constants are unequal"
+    show LDPE_UnequalOperations{}       = "Binary operations are unequal"
+    show (LDPE_UnifyError exprs)        = "Unable to unify these changes:"
                                             ++ concatMap ((" " ++) . show) exprs
-    show ADE_IdenticalBeginEnd{}       = "First and last blocks of loop are identical"
-    show ADE_UnknownError{}            = "UNKNOWN_ERROR this msg shouldn't be shown"
+    show LDPE_IdenticalBeginEnd{}       = "First and last blocks of loop are identical"
+    show LDPE_UnknownError{}            = "UNKNOWN_ERROR this msg shouldn't be shown"
 
 
 
