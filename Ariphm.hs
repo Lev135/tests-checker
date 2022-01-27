@@ -1,23 +1,21 @@
 module Ariphm (
     AriphmOp (..), VarName (..), Var (..), AriphmExprPos (..), AriphmExpr (..),
     ariphmExprP, ariphmTermP, varP,
-    VarValues (..), EvalAriphmError (..),
-    eval
+    VarValues (..), EvalError (..),
+    evalAriphm
 ) where
 
 import Control.Applicative ((<|>), Alternative (many))
 import Text.Parsec ( char, between, digit, letter, many1, Parsec, (<?>))
 import Text.Parsec.Char ( spaces )
 import Control.Monad.Combinators.Expr ( makeExprParser, Operator(InfixL, InfixR) )
-import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP, Parser)
+import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP, Parser, VarName, VarValues, EvalError (EE_UninitializedVar))
 import Data.Function (on)
 import Control.Monad.Trans.Except (Except)
 
 data AriphmOp
     = ASum | ADiff | ADiv | AProd | APow
     deriving Eq
-
-type VarName = String
 
 data Var p = Var VarName [Wrap p AriphmExpr]
 
@@ -84,21 +82,16 @@ operators = [
             let g' a b = Pos (pPos g) $ pVal g a b
             return g'
 
-type VarValues = [((VarName, [Int]), Int)]
-
-data EvalAriphmError = EAE_UninitializedVar VarName [Int]
-    deriving Show
-
-eval :: VarValues -> AriphmExprPos -> Except EvalAriphmError Int
-eval vals pe = case pVal pe of
+evalAriphm :: VarValues -> AriphmExprPos -> Except EvalError Int
+evalAriphm vals pe = case pVal pe of
     AVar (Var s idxs) -> do
-        idxs' <- mapM (eval vals) idxs
-        maybeToExcept (EAE_UninitializedVar s idxs') $ lookup (s, idxs') vals
+        idxs' <- mapM (evalAriphm vals) idxs
+        maybeToExcept (EE_UninitializedVar s idxs') $ lookup (s, idxs') vals
     AConst n ->
         return n
     ABinOp op pe1 pe2 -> do
-        n1 <- eval vals pe1
-        n2 <- eval vals pe2
+        n1 <- evalAriphm vals pe1
+        n2 <- evalAriphm vals pe2
         let op' = case op of
                         ASum -> (+)
                         ADiff -> (-)

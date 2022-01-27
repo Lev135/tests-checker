@@ -9,7 +9,7 @@ import Layout
 import Utils (Parser, Pos (pVal), concatM, parseAll, numberP)
 import Text.Parsec.Char (string, char, newline)
 import Control.Monad.Trans.Except (runExcept, Except, ExceptT (ExceptT))
-import Ariphm (Var (Var), VarValues, eval, EvalAriphmError)
+import Ariphm (Var (Var), VarValues, evalAriphm, EvalError)
 import Text.Parsec.Prim (Parsec, parserFail, (<?>))
 import Control.Monad (forM, when)
 
@@ -29,13 +29,13 @@ makeParserImpl' pes vals = foldl h (return []) (makeParserImpl <$> pes)
 makeParserImpl :: LayoutDescrPos -> VarValues -> Parser VarValues
 makeParserImpl pe vals = case pVal pe of
     LVar (Var s idxs) -> do
-        case runExcept $ mapM (eval vals) idxs of
+        case runExcept $ mapM (evalAriphm vals) idxs of
             Left  e     -> parserFail $ show e
             Right idxs' -> (\n -> [((s, idxs'), n)]) <$> (numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs')
     LLoop l -> do
         let eis = do
-            fI <- eval vals $ lFirstI l
-            lI <- eval vals $ lLastI l
+            fI <- evalAriphm vals $ lFirstI l
+            lI <- evalAriphm vals $ lLastI l
             -- TODO : check for correct bounds
             return ([fI .. lI], lI)
         case runExcept eis of

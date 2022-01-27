@@ -3,7 +3,8 @@ module Utils (
     allEq, map2, concatM,
     Box (..), ($$), (=<.<), Wrap,
     Pos (..), PosSegm, makePos, withPosP,
-    maybeToExcept, guardE
+    maybeToExcept, guardE,
+    VarName (..), VarValues (..), EvalError (..)
 ) where
 
 import Text.Parsec
@@ -102,3 +103,11 @@ maybeToExcept e Nothing  = throwE e
 guardE :: e -> Bool -> Except e ()
 guardE _ True  = return ()
 guardE e False = throwE e
+
+
+type VarName = String
+
+type VarValues = [((VarName, [Int]), Int)]
+
+data EvalError = EE_UninitializedVar VarName [Int]
+    deriving Show
