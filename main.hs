@@ -1,8 +1,9 @@
 module Main where
 import Control.Monad.Trans.Except (runExcept)
-import Layout (readDescr)
+import Layout (readLayout)
 import TestParser (makeParser)
 import Utils (parseAll)
+import Descr (descrP)
 
 main :: IO ()
 main = do
@@ -12,11 +13,11 @@ main = do
     putStrLn "Input file code:"
     putStr descr
     putStrLn "Processed data:"
-    let descr' = readDescr descr
-    case runExcept descr' of
-        Left  e      -> putStrLn e
+    let descr' = parseAll descrP descr
+    case descr' of
+        Left  e      -> print e
         Right descrs -> do
-            putStrLn $ concatMap ((++"\n") . show) descrs
+            print descrs
             putStr "Test file name: "
             testFileName <- getLine
             test <- readFile ("test/" ++ testFileName ++ ".txt")
@@ -28,6 +29,6 @@ main = do
                 Left  e     -> print e
                 Right vals  -> mapM_ h vals
     where
-        h ((name, ixs), v) = putStrLn $ name 
+        h ((name, ixs), v) = putStrLn $ name
                             ++ concatMap (\i -> "[" ++ show i ++ "]") ixs
                             ++ " = " ++ show v

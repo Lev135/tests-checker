@@ -2,7 +2,7 @@ module Layout (
     LayoutSpaces (..),
     -- LayoutDescrLex (..), LayoutDescrLexPos,
     Loop (..), LayoutDescr (..), LayoutDescrPos,
-    readDescr
+    readLayout, layoutP
 )   where
 
 import Ariphm
@@ -32,7 +32,7 @@ import Text.Parsec
     ( letter, satisfy, string, eof,
       many, many1,
       try, (<?>),
-      parse, ParseError, sourceLine, sourceColumn )
+      parse, ParseError, sourceLine, sourceColumn, parserFail, getInput )
 
 import Control.Monad (guard)
 import Data.List (group, nub, sort)
@@ -53,8 +53,8 @@ data LayoutDescrLex
 
 type LayoutDescrLexPos = Pos LayoutDescrLex
 
-alignP :: Parser [LayoutDescrLexPos]
-alignP = concat <$> many (((:[]) <$> try vLoopP <|> try lineP) <> ((:[]) <$> newLineP))
+layoutLexP :: Parser [LayoutDescrLexPos]
+layoutLexP = concat <$> many (((:[]) <$> try vLoopP <|> try lineP) <> ((:[]) <$> newLineP))
     where newLineP  = withPosP (LLSpaces <$> vSpacesP)
 
 vSpacesP :: Parser LayoutSpaces
@@ -239,12 +239,21 @@ instance Box p => Show (LayoutDescr p) where
     show (LBlock es )      = "{" ++ concatMap (show $$) es ++ "}"
     show (LSpaces sp)      = show sp
 
-readDescr :: String -> Except String [LayoutDescrPos]
-readDescr s = do
-    lex <- case parse (alignP <* eof) "" s of
+readLayout :: String -> Except String [LayoutDescrPos]
+readLayout s = do
+    lex <- case parse (layoutLexP <* eof) "" s of
       Left  e ->    throwE $ "ParseError: " ++ show e
       Right lex ->  return lex
     mapM makeDescr lex `catchE` (throwE . makeProcessErrorMsg (lines s))
+
+layoutP :: Parser [LayoutDescrPos]
+layoutP = do
+    inp <- getInput
+    let inpLines = lines inp
+    lex <- layoutLexP
+    case runExcept $ mapM makeDescr lex of
+        Left  e     -> parserFail $ makeProcessErrorMsg inpLines e 
+        Right descr -> return descr
 
 makeProcessErrorMsg :: [String] -> AlignDescrProcessError -> String
 makeProcessErrorMsg sourceLines (ADE errT segms1 segms2)
@@ -371,7 +380,7 @@ helper (msg, inp)= do
     putStrLn "input data"
     mapM_ (\(i, s) -> putStrLn $ show i ++ ".\t" ++ s) $ zip [1..] $ lines inp
     putStrLn "output data"
-    let outp = readDescr inp
+    let outp = readLayout inp
     case runExcept outp of
         Left  e      -> putStrLn e
         Right descrs -> putStrLn $ concatMap show descrs

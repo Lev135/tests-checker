@@ -4,18 +4,31 @@ import Layout
     ( LayoutSpaces(ANewLine, ASpace, ANoSpace),
       LayoutDescr(LSpaces, LBlock, LString, LLoop, LVar),
       Loop(lLastI, lFirstI, lIdxVar, lBlock, lSepSp),
-      readDescr,
+      readLayout,
       LayoutDescrPos )
-import Utils (Parser, Pos (pVal), concatM, parseAll, numberP)
+import Utils (Parser, Pos (pVal, Pos), concatM, parseAll, numberP, Wrap)
 import Text.Parsec.Char (string, char, newline)
 import Control.Monad.Trans.Except (runExcept, Except, ExceptT (ExceptT))
 import Ariphm (Var (Var), VarValues, evalAriphm, EvalError)
 import Text.Parsec.Prim (Parsec, parserFail, (<?>))
 import Control.Monad (forM, when)
+import Descr (DescrPos, Descr (dLayout, dConds))
+import Conditions (Cond, CondPos, evalCond)
 
 
-makeParser :: [LayoutDescrPos] -> Parser VarValues
-makeParser = flip makeParserImpl' []
+makeParser :: DescrPos -> Parser VarValues
+makeParser (Pos p descr)= do
+    vals <- makeParserImpl' (dLayout descr) []
+    checkConds (dConds descr) vals
+    return vals
+
+checkConds :: [CondPos] -> VarValues -> Parser ()
+checkConds conds vals = () <$ forM conds (\cond -> do
+    case runExcept $ evalCond vals cond of
+        Left  e     -> parserFail $ show e
+        Right True  -> return ()
+        Right False -> parserFail $ "conditionFailed: " ++ show cond
+        )
 
 makeParserImpl' :: [LayoutDescrPos] -> VarValues -> Parser VarValues
 makeParserImpl' pes vals = foldl h (return []) (makeParserImpl <$> pes)
@@ -60,12 +73,12 @@ helper (msg, inp) test = do
     putStrLn "input data"
     mapM_ (\(i, s) -> putStrLn $ show i ++ ".\t" ++ s) $ zip [1..] $ lines inp
     putStrLn "output data"
-    let outp = readDescr inp
+    let outp = readLayout inp
     case runExcept outp of
         Left  e      -> putStrLn e
         Right descrs -> do
             putStrLn $ concatMap show descrs
-            let p = makeParser descrs
+            let p = makeParserImpl' descrs []
             putStrLn "Test to check"
             putStrLn test
             case parseAll p test of
