@@ -14,11 +14,12 @@ import Text.Parsec.Prim (Parsec, parserFail, (<?>))
 import Control.Monad (forM, when)
 import Descr (DescrPos, Descr (dLayout, dConds))
 import Conditions (Cond, CondPos, evalCond)
+import qualified Data.Map as M
 
 
 makeParser :: DescrPos -> Parser VarValues
 makeParser (Pos p descr)= do
-    vals <- makeParserImpl' (dLayout descr) []
+    vals <- makeParserImpl' (dLayout descr) M.empty
     checkConds (dConds descr) vals
     return vals
 
@@ -31,20 +32,22 @@ checkConds conds vals = () <$ forM conds (\cond -> do
         )
 
 makeParserImpl' :: [LayoutDescrPos] -> VarValues -> Parser VarValues
-makeParserImpl' pes vals = foldl h (return []) (makeParserImpl <$> pes)
+makeParserImpl' pes vals = foldl h (return M.empty) (makeParserImpl <$> pes)
     where
         h :: Parser VarValues -> (VarValues -> Parser VarValues) -> Parser VarValues
         h a f = do
             a' <- a
-            b  <- f (a' <> vals)
-            return $ a' <> b
+            b  <- f (M.unionWith (<>) a' vals)
+            return $ M.unionWith (<>) a' b
 
 makeParserImpl :: LayoutDescrPos -> VarValues -> Parser VarValues
 makeParserImpl pe vals = case pVal pe of
     LVar (Var s idxs) -> do
         case runExcept $ mapM (evalAriphm vals) idxs of
             Left  e     -> parserFail $ show e
-            Right idxs' -> (\n -> [((s, idxs'), n)]) <$> (numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs')
+            Right idxs' -> M.singleton s . M.singleton idxs' <$> (
+                    numberP <?> s <> concatMap (\s -> "[" ++ show s ++ "]") idxs'
+                )
     LLoop l -> do
         let eis = do
             fI <- evalAriphm vals $ lFirstI l
@@ -53,14 +56,14 @@ makeParserImpl pe vals = case pVal pe of
             return ([fI .. lI], lI)
         case runExcept eis of
             Left  e         -> parserFail $ show e
-            Right (is, lI)  -> concat <$> forM is (\i -> do
-                    let vals' = ((lIdxVar l, []), i) : vals
+            Right (is, lI)  -> M.unionsWith (<>) <$> forM is (\i -> do
+                    let vals' = M.insert (lIdxVar l) (M.singleton [] i) vals
                     makeParserImpl (lBlock l) vals'
                         <* when (i < lI) (spacesParser (lSepSp l))
                 )
-    LString s   -> [] <$ string s
+    LString s   -> M.empty <$ string s
     LBlock poss -> makeParserImpl' poss vals
-    LSpaces sp  -> [] <$ spacesParser sp
+    LSpaces sp  -> M.empty  <$ spacesParser sp
 
 spacesParser :: LayoutSpaces -> Parser ()
 spacesParser ANoSpace   = return ()
@@ -78,7 +81,7 @@ helper (msg, inp) test = do
         Left  e      -> putStrLn e
         Right descrs -> do
             putStrLn $ concatMap show descrs
-            let p = makeParserImpl' descrs []
+            let p = makeParserImpl' descrs M.empty
             putStrLn "Test to check"
             putStrLn test
             case parseAll p test of

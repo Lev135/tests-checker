@@ -13,6 +13,7 @@ import Data.List (group, nub)
 import Data.Maybe (catMaybes)
 import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad ((>=>))
+import qualified Data.Map as M
 
 type Parser = Parsec String ()
 
@@ -107,7 +108,9 @@ guardE e False = throwE e
 
 type VarName = String
 
-type VarValues = [((VarName, [Int]), Int)]
+type VarValues = M.Map VarName (M.Map [Int] Int)
 
-data EvalError = EE_UninitializedVar VarName [Int]
+data EvalError
+    = EE_UninitializedVar   VarName
+    | EE_UninitializedIndex VarName [Int]
     deriving Show

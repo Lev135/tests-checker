@@ -9,9 +9,10 @@ import Control.Applicative ((<|>), Alternative (many))
 import Text.Parsec ( char, between, digit, letter, many1, Parsec, (<?>))
 import Text.Parsec.Char ( spaces )
 import Control.Monad.Combinators.Expr ( makeExprParser, Operator(InfixL, InfixR) )
-import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP, Parser, VarName, VarValues, EvalError (EE_UninitializedVar))
+import Utils (lineSpaces, Pos (pVal, Pos, pPos), withPosP, Wrap, Box (unBox), ($$), betweenCh, maybeToExcept, numberP, Parser, VarName, VarValues, EvalError (EE_UninitializedVar, EE_UninitializedIndex))
 import Data.Function (on)
 import Control.Monad.Trans.Except (Except)
+import qualified Data.Map as M
 
 data AriphmOp
     = ASum | ADiff | ADiv | AProd | APow
@@ -86,7 +87,7 @@ evalAriphm :: VarValues -> AriphmExprPos -> Except EvalError Int
 evalAriphm vals pe = case pVal pe of
     AVar (Var s idxs) -> do
         idxs' <- mapM (evalAriphm vals) idxs
-        maybeToExcept (EE_UninitializedVar s idxs') $ lookup (s, idxs') vals
+        findVar vals s idxs'
     AConst n ->
         return n
     ABinOp op pe1 pe2 -> do
@@ -99,3 +100,9 @@ evalAriphm vals pe = case pVal pe of
                         AProd -> (*)
                         APow -> (^)
         return $ n1 `op'` n2
+
+
+findVar :: VarValues -> String -> [Int] -> Except EvalError Int
+findVar vals varName idxs = do
+    x <- maybeToExcept (EE_UninitializedVar varName) $ M.lookup varName vals
+    maybeToExcept (EE_UninitializedIndex varName idxs) $ M.lookup idxs x

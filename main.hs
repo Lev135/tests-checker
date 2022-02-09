@@ -4,6 +4,7 @@ import Layout (readLayout)
 import TestParser (makeParser)
 import Utils (parseAll)
 import Descr (descrP)
+import qualified Data.Map as M
 
 main :: IO ()
 main = do
@@ -27,8 +28,9 @@ main = do
             let p = makeParser descrs
             case parseAll p test of
                 Left  e     -> print e
-                Right vals  -> mapM_ h vals
+                Right vals  -> mapM_ h' $ M.toList vals
     where
-        h ((name, ixs), v) = putStrLn $ name
+        h' (name, vs) = mapM_ (h name) $ M.toList vs
+        h name (ixs, v) = putStrLn $ name
                             ++ concatMap (\i -> "[" ++ show i ++ "]") ixs
                             ++ " = " ++ show v

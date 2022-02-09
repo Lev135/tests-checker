@@ -92,7 +92,7 @@ evalCond vals pe = case pVal pe of
         evC = evalCond vals
         evA = evalAriphm vals
 
-evalTest :: [((VarName, [Int]), Int)] -> String -> IO ()
+evalTest :: VarValues -> String -> IO ()
 evalTest vals str = do
     case parseAll condP str of
         Left  e -> print e
